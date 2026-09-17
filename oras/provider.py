@@ -923,11 +923,12 @@ class Registry:
 
             # A directory will need to be uncompressed and moved
             if layer["mediaType"] == oras.defaults.default_blob_dir_media_type:
-                targz = oras.utils.get_tmpfile(suffix=".tar.gz")
-                self.download_blob(container, layer["digest"], targz)
+                with TemporaryDirectory() as tmpdir:
+                    targz = oras.utils.get_tmpfile(tmpdir=tmpdir, suffix=".tar.gz")
+                    self.download_blob(container, layer["digest"], targz)
 
-                # The artifact will be extracted to the correct name
-                oras.utils.extract_targz(targz, os.path.dirname(outfile))
+                    # The artifact will be extracted to the correct name
+                    oras.utils.extract_targz(targz, os.path.dirname(outfile))
 
             # Anything else just extracted directly
             else:

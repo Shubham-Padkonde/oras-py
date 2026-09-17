@@ -2,8 +2,11 @@ __author__ = "Vanessa Sochat"
 __copyright__ = "Copyright The ORAS Authors."
 __license__ = "Apache-2.0"
 
+import io
 import os
 import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -16,6 +19,63 @@ import oras.provider
 import oras.utils
 
 here = Path(__file__).resolve().parent
+
+
+@pytest.mark.parametrize("use_default_outdir", [False, True])
+@pytest.mark.parametrize("outcome", ["success", "download_error", "invalid_archive"])
+def test_pull_cleans_temporary_archive(
+    tmp_path, monkeypatch, use_default_outdir, outcome
+):
+    client = oras.provider.Registry(hostname="registry.example", insecure=True)
+    temporary_root = tmp_path / "temporary"
+    temporary_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temporary_root))
+    monkeypatch.setattr(client.auth, "load_configs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        client,
+        "get_manifest",
+        lambda *args: {
+            "layers": [
+                {
+                    "mediaType": oras.defaults.default_blob_dir_media_type,
+                    "digest": "sha256:example",
+                    "annotations": {oras.defaults.annotation_title: "artifact"},
+                }
+            ]
+        },
+    )
+    downloads = []
+    payload = b"artifact contents"
+
+    def download_blob(container, digest, destination):
+        downloads.append(Path(destination))
+        if outcome == "download_error":
+            Path(destination).write_bytes(b"partial download")
+            raise OSError("download interrupted")
+        if outcome == "invalid_archive":
+            Path(destination).write_bytes(b"invalid archive")
+            return
+        with tarfile.open(destination, "w:gz") as archive:
+            member = tarfile.TarInfo("artifact/content.txt")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+
+    monkeypatch.setattr(client, "download_blob", download_blob)
+    outdir = None if use_default_outdir else str(tmp_path / "output")
+    if outcome == "success":
+        files = client.pull("registry.example/repository:tag", outdir=outdir)
+        assert len(files) == 1
+        assert (Path(files[0]) / "content.txt").read_bytes() == payload
+    else:
+        error = OSError if outcome == "download_error" else tarfile.ReadError
+        with pytest.raises(error):
+            client.pull("registry.example/repository:tag", outdir=outdir)
+
+    assert len(downloads) == 1
+    assert not downloads[0].exists()
+    assert not downloads[0].parent.exists()
+    # Only the caller's implicit output directory should survive the pull.
+    assert len(list(temporary_root.iterdir())) == int(use_default_outdir)
 
 
 def test_push_quiet_output_does_not_write_stdout(tmp_path, monkeypatch, capsys):
