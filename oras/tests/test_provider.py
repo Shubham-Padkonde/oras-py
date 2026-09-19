@@ -2,8 +2,8 @@ __author__ = "Vanessa Sochat"
 __copyright__ = "Copyright The ORAS Authors."
 __license__ = "Apache-2.0"
 
-import io
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -27,27 +27,24 @@ def test_pull_cleans_temporary_archive(
     tmp_path, monkeypatch, use_default_outdir, outcome
 ):
     client = oras.provider.Registry(hostname="registry.example", insecure=True)
+
+    # Archive and describe a directory the same way push does.
+    artifact = tmp_path / "source" / "artifact"
+    artifact.mkdir(parents=True)
+    (artifact / "content.txt").write_text("artifact contents")
+    archive = oras.utils.make_targz(str(artifact), str(tmp_path / "artifact.tar.gz"))
+    layer = oras.oci.NewLayer(archive, is_dir=True)
+    layer["annotations"] = {oras.defaults.annotation_title: artifact.name}
+
     temporary_root = tmp_path / "temporary"
     temporary_root.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(temporary_root))
     monkeypatch.setattr(client.auth, "load_configs", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        client,
-        "get_manifest",
-        lambda *args: {
-            "layers": [
-                {
-                    "mediaType": oras.defaults.default_blob_dir_media_type,
-                    "digest": "sha256:example",
-                    "annotations": {oras.defaults.annotation_title: "artifact"},
-                }
-            ]
-        },
-    )
+    monkeypatch.setattr(client, "get_manifest", lambda *args: {"layers": [layer]})
     downloads = []
-    payload = b"artifact contents"
 
     def download_blob(container, digest, destination):
+        assert digest == layer["digest"]
         downloads.append(Path(destination))
         if outcome == "download_error":
             Path(destination).write_bytes(b"partial download")
@@ -55,17 +52,14 @@ def test_pull_cleans_temporary_archive(
         if outcome == "invalid_archive":
             Path(destination).write_bytes(b"invalid archive")
             return
-        with tarfile.open(destination, "w:gz") as archive:
-            member = tarfile.TarInfo("artifact/content.txt")
-            member.size = len(payload)
-            archive.addfile(member, io.BytesIO(payload))
+        shutil.copyfile(archive, destination)
 
     monkeypatch.setattr(client, "download_blob", download_blob)
     outdir = None if use_default_outdir else str(tmp_path / "output")
     if outcome == "success":
         files = client.pull("registry.example/repository:tag", outdir=outdir)
         assert len(files) == 1
-        assert (Path(files[0]) / "content.txt").read_bytes() == payload
+        assert (Path(files[0]) / "content.txt").read_text() == "artifact contents"
     else:
         error = OSError if outcome == "download_error" else tarfile.ReadError
         with pytest.raises(error):
