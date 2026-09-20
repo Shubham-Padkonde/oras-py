@@ -29,9 +29,12 @@ def test_pull_cleans_temporary_archive(
     client = oras.provider.Registry(hostname="registry.example", insecure=True)
 
     # Archive and describe a directory the same way push does.
+    target = "registry.example/repository:tag"
+    content_name = "content.txt"
+    content = "artifact contents"
     artifact = tmp_path / "source" / "artifact"
     artifact.mkdir(parents=True)
-    (artifact / "content.txt").write_text("artifact contents")
+    (artifact / content_name).write_text(content)
     archive = oras.utils.make_targz(str(artifact), str(tmp_path / "artifact.tar.gz"))
     layer = oras.oci.NewLayer(archive, is_dir=True)
     layer["annotations"] = {oras.defaults.annotation_title: artifact.name}
@@ -57,13 +60,13 @@ def test_pull_cleans_temporary_archive(
     monkeypatch.setattr(client, "download_blob", download_blob)
     outdir = None if use_default_outdir else str(tmp_path / "output")
     if outcome == "success":
-        files = client.pull("registry.example/repository:tag", outdir=outdir)
+        files = client.pull(target, outdir=outdir)
         assert len(files) == 1
-        assert (Path(files[0]) / "content.txt").read_text() == "artifact contents"
+        assert (Path(files[0]) / content_name).read_text() == content
     else:
         error = OSError if outcome == "download_error" else tarfile.ReadError
         with pytest.raises(error):
-            client.pull("registry.example/repository:tag", outdir=outdir)
+            client.pull(target, outdir=outdir)
 
     assert len(downloads) == 1
     assert not downloads[0].exists()
