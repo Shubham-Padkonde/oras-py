@@ -46,6 +46,24 @@ def test_push_quiet_output_does_not_write_stdout(tmp_path, monkeypatch, capsys):
     info.assert_called_once_with(f"Successfully pushed {container}")
 
 
+def test_login_prompts_for_missing_credentials(monkeypatch):
+    client = oras.provider.Registry(hostname="registry.example", insecure=True)
+    answers = iter(["alice", "secret"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    set_basic_auth = Mock()
+    monkeypatch.setattr(client.auth, "set_basic_auth", set_basic_auth)
+    monkeypatch.setattr(
+        oras.utils,
+        "get_docker_client",
+        lambda **kwargs: Mock(login=lambda **kw: {"Status": "Login Succeeded"}),
+    )
+
+    result = client.login(hostname="registry.example")
+
+    assert result == {"Status": "Login Succeeded"}
+    set_basic_auth.assert_called_once_with("alice", "secret")
+
+
 def test_push_quiet_suppresses_completion_message(tmp_path, monkeypatch):
     client = oras.provider.Registry(hostname="registry.example", insecure=True)
     artifact = tmp_path / "artifact.txt"

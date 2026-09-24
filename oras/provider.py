@@ -143,8 +143,8 @@ class Registry:
 
     def login(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         password_stdin: bool = False,
         tls_verify: bool = True,
         hostname: Optional[str] = None,
@@ -153,9 +153,9 @@ class Registry:
         """
         Login to a registry.
 
-        :param username: the user account name
+        :param username: the user account name, prompted for if not provided
         :type username: str
-        :param password: the user account password
+        :param password: the user account password, prompted for if not provided
         :type password: str
         :param password_stdin: get the password from standard input
         :type password_stdin: bool
